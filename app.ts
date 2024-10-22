@@ -33,9 +33,13 @@ class PublishSubscribeService implements IPublishSubscribeService {
     if (subscribers) {
       subscribers.forEach((subscriber) => {
         const newEvent = subscriber.handle(event);
+        console.log(newEvent);
         if (newEvent) this.publish(newEvent);
       });
     }
+  }
+  getSubscribers(): Map<string, Set<ISubscriber>> {
+    return this.subscribers;
   }
 }
 
@@ -106,11 +110,21 @@ class MachineSaleSubscriber implements ISubscriber {
   constructor(private machines: Machine[]) {}
 
   handle(event: MachineSaleEvent): IEvent | undefined {
-    const machine = this.machines.find((m) => m.id === event.machineId());
-    if (machine) {
-      machine.stockLevel -= event.getSoldQuantity();
-      if (machine.stockLevel < 3) {
-        return new LowStockWarningEvent(machine.id);
+    if (event instanceof MachineSaleEvent) {
+      const machine = this.machines.find((m) => m.id === event.machineId());
+      if (machine) {
+        const oldLevel = machine.stockLevel;
+        machine.stockLevel -= event.getSoldQuantity();
+        console.log(
+          event.type(),
+          event.machineId(),
+          event.getSoldQuantity(),
+          machine.id,
+          machine.stockLevel
+        );
+        if (machine.stockLevel < 3 && oldLevel >= 3) {
+          return new LowStockWarningEvent(machine.id);
+        }
       }
     }
   }
@@ -120,11 +134,48 @@ class MachineRefillSubscriber implements ISubscriber {
   constructor(private machines: Machine[]) {}
 
   handle(event: MachineRefillEvent): IEvent | undefined {
-    const machine = this.machines.find((m) => m.id === event.machineId());
-    if (machine) {
-      machine.stockLevel += event.getRefillQuantity();
-      if (machine.stockLevel >= 3) {
-        return new StockLevelOkEvent(machine.id);
+    if (event instanceof MachineRefillEvent) {
+      const machine = this.machines.find((m) => m.id === event.machineId());
+      if (machine) {
+        const oldLevel = machine.stockLevel;
+        machine.stockLevel += event.getRefillQuantity();
+        console.log(
+          event.type(),
+          event.machineId(),
+          event.getRefillQuantity(),
+          machine.id,
+          machine.stockLevel
+        );
+        // Will only return Ok if
+        if (machine.stockLevel >= 3 && oldLevel < 3) {
+          return new StockLevelOkEvent(machine.id);
+        }
+      }
+    }
+  }
+}
+
+class StockwarningSubscriber implements ISubscriber {
+  constructor(private machines: Machine[]) {}
+  handle(event: LowStockWarningEvent): IEvent | undefined {
+    if (event instanceof LowStockWarningEvent) {
+      console.log(event.type(), event.machineId());
+      const machine = this.machines.find((m) => m.id === event.machineId());
+      if (machine) {
+        return new MachineRefillEvent(3 - machine.stockLevel, machine.id);
+      }
+    }
+  }
+}
+
+class StockLevelOkSubscriber implements ISubscriber {
+  constructor(private machines: Machine[]) {}
+  handle(event: StockLevelOkEvent): undefined {
+    if (event instanceof StockLevelOkEvent) {
+      console.log(event.type(), event.machineId());
+      const machine = this.machines.find((m) => m.id === event.machineId());
+      if (machine) {
+        //TODO
       }
     }
   }
@@ -132,7 +183,7 @@ class MachineRefillSubscriber implements ISubscriber {
 
 // objects
 class Machine {
-  public stockLevel = 10;
+  public stockLevel = 3;
   public id: string;
 
   constructor(id: string) {
@@ -170,14 +221,27 @@ const eventGenerator = (): IEvent => {
     new Machine("003"),
   ];
   // create the PubSub service
-  const pubSubService: IPublishSubscribeService = new PublishSubscribeService();
+  const pubSubService: PublishSubscribeService = new PublishSubscribeService();
 
   // create a machine sale event subscriber. inject the machines (all subscribers should do this)
   const saleSubscriber = new MachineSaleSubscriber(machines);
+  const refilSubscriber = new MachineRefillSubscriber(machines);
+  const stockWarningSubscriber = new StockwarningSubscriber(machines);
+  const stockLevelOkSubscriber = new StockLevelOkSubscriber(machines);
+
+  pubSubService.subscribe("sale", saleSubscriber);
+  pubSubService.subscribe("refill", refilSubscriber);
+  pubSubService.subscribe("LowStock", stockWarningSubscriber);
+  pubSubService.subscribe("StockLevelOk", stockLevelOkSubscriber);
 
   // create 5 random events
   const events = [1, 2, 3, 4, 5].map((i) => eventGenerator());
 
   // publish the events
-  events.map(pubSubService.publish);
+  events.map(pubSubService.publish.bind(pubSubService));
+
+  machines.map((machine) => {
+    console.log(machine.id, machine.stockLevel);
+  });
+  console.log(pubSubService.getSubscribers());
 })();

@@ -9,7 +9,7 @@ interface ISubscriber {
 }
 
 interface IPublishSubscribeService {
-  publish(event: IEvent): void;
+  publish(event: IEvent, events: IEvent[]): void;
   subscribe(type: string, handler: ISubscriber): void;
   unsubscribe(eventType: string, subscriber: ISubscriber): void;
 }
@@ -28,13 +28,14 @@ class PublishSubscribeService implements IPublishSubscribeService {
     this.subscribers.get(eventType)?.delete(subscriber);
   }
 
-  publish(event: IEvent): void {
+  publish(_event: IEvent, events: IEvent[]): void {
+    const event = _event;
     const subscribers = this.subscribers.get(event.type());
     if (subscribers) {
       subscribers.forEach((subscriber) => {
         const newEvent = subscriber.handle(event);
-        console.log(newEvent);
-        if (newEvent) this.publish(newEvent);
+        if (newEvent) events.push(newEvent);
+        console.log(events);
       });
     }
   }
@@ -122,6 +123,7 @@ class MachineSaleSubscriber implements ISubscriber {
           machine.id,
           machine.stockLevel
         );
+        // will only return Ok if breach the minimum stock level
         if (machine.stockLevel < 3 && oldLevel >= 3) {
           return new LowStockWarningEvent(machine.id);
         }
@@ -146,7 +148,7 @@ class MachineRefillSubscriber implements ISubscriber {
           machine.id,
           machine.stockLevel
         );
-        // Will only return Ok if
+        // Will only return Ok if breach the minimum stock level
         if (machine.stockLevel >= 3 && oldLevel < 3) {
           return new StockLevelOkEvent(machine.id);
         }
@@ -183,6 +185,7 @@ class StockLevelOkSubscriber implements ISubscriber {
 
 // objects
 class Machine {
+  // stock level is 3 to check stock level warning and ok events
   public stockLevel = 3;
   public id: string;
 
@@ -238,10 +241,11 @@ const eventGenerator = (): IEvent => {
   const events = [1, 2, 3, 4, 5].map((i) => eventGenerator());
 
   // publish the events
-  events.map(pubSubService.publish.bind(pubSubService));
+  while (events.length > 0) {
+    pubSubService.publish(events.shift(), events);
+  }
 
   machines.map((machine) => {
     console.log(machine.id, machine.stockLevel);
   });
-  console.log(pubSubService.getSubscribers());
 })();
